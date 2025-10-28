@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -42,7 +42,26 @@ type SimpleFlightServer struct {
 
 func NewSimpleFlightServer(dbPath string) *SimpleFlightServer {
 
-	c, err := duckdb.NewConnector(dbPath, nil)
+	// Create a blank DuckDB database if it doesn't exist
+	if dbPath != "" {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			// Create the database file
+			db, err := sql.Open("duckdb", dbPath)
+			if err != nil {
+				panic(fmt.Sprintf("Failed to create database: %v", err))
+			}
+			db.Close()
+			fmt.Printf("Created new database at: %s\n", dbPath)
+		}
+	}
+
+	var connectionString string
+	if dbPath != "" {
+		connectionString = dbPath + "?access_mode=read_only"
+	} else {
+		connectionString = ""
+	}
+	c, err := duckdb.NewConnector(connectionString, nil)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -117,7 +136,7 @@ func (s *SimpleFlightServer) GetFlightInfo(ctx context.Context, ticket *flightpb
 
 		rdr, err := arrow.QueryContext(context.Background(), query)
 		if err != nil {
-			fmt.Println(err)
+			return nil, status.Errorf(codes.Canceled, err.Error())
 		}
 		defer rdr.Release()
 
@@ -171,31 +190,6 @@ func (s *SimpleFlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightSe
 	fmt.Println("DoGet")
 
 	query := string(ticket.GetTicket())
-	entry := strings.Split(query, " ")
-
-	if strings.ToLower(entry[0]) == "select" {
-
-		// Obtain the Arrow from the connection.
-		arrow, err := duckdb.NewArrowFromConn(s.conn)
-
-		rdr, err := arrow.QueryContext(context.Background(), query)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer rdr.Release()
-
-		writer := flight.NewRecordWriter(stream, ipc.WithSchema(rdr.Schema()))
-		defer func() {
-			if err := writer.Close(); err != nil {
-				log.Printf("Error closing writer: %v", err)
-			}
-		}()
-		for rdr.Next() {
-			writer.Write(rdr.RecordBatch())
-		}
-
-		return nil
-	}
 
 	if query == "CommandGetSqlInfo" {
 		bldr := array.NewRecordBuilder(s.alloc, schema_ref.SqlInfo)
@@ -220,9 +214,31 @@ func (s *SimpleFlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightSe
 		writer.Write(batch)
 
 		return nil
+	} else {
+
+		// Obtain the Arrow from the connection.
+		arrow, err := duckdb.NewArrowFromConn(s.conn)
+
+		rdr, err := arrow.QueryContext(context.Background(), query)
+		if err != nil {
+			return status.Errorf(codes.Canceled, err.Error())
+		}
+		defer rdr.Release()
+
+		writer := flight.NewRecordWriter(stream, ipc.WithSchema(rdr.Schema()))
+		defer func() {
+			if err := writer.Close(); err != nil {
+				log.Printf("Error closing writer: %v", err)
+			}
+		}()
+		for rdr.Next() {
+			writer.Write(rdr.RecordBatch())
+		}
+
+		return nil
 	}
 
-	return status.Errorf(codes.Unimplemented, "unknown ticket type: %s", ticket.String())
+	// return status.Errorf(codes.Unimplemented, "unknown ticket type: %s", ticket.String())
 
 }
 
