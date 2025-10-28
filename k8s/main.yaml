@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duckkube
+  labels:
+    k8s-app: duckkube
+spec:
+  selector:
+    matchLabels:
+      k8s-app: duckkube
+  template:
+    metadata:
+      labels:
+        k8s-app: duckkube
+    spec:
+      initContainers:
+      - name: versity
+        image: versity/versitygw
+        restartPolicy: Always
+        command:
+          - /app/versitygw
+        args:
+          - --access=access 
+          - --secret=secret 
+          - azure 
+          - --account=orbitdatadev 
+          - --access-key=$(ACCESS_KEY)
+        env:
+          - name: ACCESS_KEY
+            value: ...
+
+      - name: s3fs
+        image: ghcr.io/nginxinc/nginx-s3-gateway/nginx-oss-s3-gateway:latest
+        restartPolicy: Always
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            value: access
+          - name: AWS_SECRET_ACCESS_KEY
+            value: secret
+          - name: S3_BUCKET_NAME
+            value: dremio
+          - name: S3_SERVER
+            value: 0.0.0.0
+          - name: S3_SERVER_PROTO
+            value: "http"
+          - name: S3_SERVER_PORT
+            value: "7070"
+          - name: S3_REGION
+            value: "us-east-1"
+          - name: S3_STYLE
+            value: "path"
+          - name: ALLOW_DIRECTORY_LIST
+            value: "false"
+          - name: AWS_SIGS_VERSION
+            value: "4"
+
+      - name: setup-duckdb
+        image: datacatering/duckdb:v1.4.1
+        command: 
+          - /duckdb
+        args:
+          - -c
+          - |
+            SET secret_directory='/home/duckdb/.duckdb/stored_secrets';
+            SET extension_directory='/home/duckdb/.duckdb/extensions';
+
+            INSTALL airport FROM community;
+            INSTALL http_client FROM community;
+            INSTALL httpfs;
+
+            CREATE PERSISTENT SECRET (
+                TYPE s3,
+                PROVIDER config,
+                KEY_ID 'access',
+                SECRET 'secret',
+                REGION 'us-east-1',
+                ENDPOINT '0.0.0.0:7070',
+                USE_SSL false,
+                URL_STYLE 'path'
+            );
+
+            CREATE VIEW hello_world AS (SELECT 'hello' AS world);
+          - /home/duckdb/duckdb.db
+        securityContext:
+          runAsUser: 1001
+        volumeMounts: 
+          - name: mntdata
+            mountPath: /home/duckdb
+
+      containers:
+      - name: duckkube
+        image: ghcr.io/markdessain/duckdb-server:latest
+        command:
+          - duckdb-server
+        args:
+          - -db
+          - /home/duckdb/duckdb.db
+        securityContext:
+          runAsUser: 1001
+        volumeMounts: 
+          - name: mntdata
+            mountPath: /home/duckdb
+
+      volumes:
+        - name: mntdata
+          emptyDir:
+            sizeLimit: 500Mi
