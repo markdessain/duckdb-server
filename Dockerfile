@@ -61,5 +61,5 @@ EXPOSE 32010
 # HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 #     CMD duckdb-server --help > /dev/null || exit 1
 
-ENTRYPOINT []
-CMD ["duckdb-server"]
+ENTRYPOINT ["duckdb-server"]
+CMD []
