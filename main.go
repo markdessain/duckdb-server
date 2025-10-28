@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql/driver"
 	"flag"
 	"fmt"
 	"log"
@@ -35,15 +36,59 @@ func main() {
 // SimpleFlightServer implements the Flight service
 type SimpleFlightServer struct {
 	flight.BaseFlightServer
-	alloc  memory.Allocator
-	dbPath string
+	alloc memory.Allocator
+	conn  driver.Conn
 }
 
 func NewSimpleFlightServer(dbPath string) *SimpleFlightServer {
-	ret := &SimpleFlightServer{
-		alloc:  memory.NewGoAllocator(),
-		dbPath: dbPath,
+
+	c, err := duckdb.NewConnector(dbPath, nil)
+	if err != nil {
+		fmt.Println(err)
 	}
+
+	conn, err := c.Connect(context.Background())
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	db := conn.(*duckdb.Conn)
+
+	rows, err := db.QueryContext(context.Background(), "SELECT extension_name FROM duckdb_extensions() WHERE installed", []driver.NamedValue{})
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+
+	var extensions []string
+	for {
+
+		var name string
+		x := []driver.Value{&name}
+		err := rows.Next(x)
+
+		if err != nil {
+			break
+		}
+		extensions = append(extensions, x[0].(string))
+	}
+
+	fmt.Println(extensions)
+	// Step 2: Load each extension
+	for _, ext := range extensions {
+		_, err := db.ExecContext(context.Background(), fmt.Sprintf("LOAD %s;", ext), []driver.NamedValue{})
+		if err != nil {
+			fmt.Printf("Failed to load extension %s: %v\n", ext, err)
+		} else {
+			fmt.Printf("Loaded extension: %s\n", ext)
+		}
+	}
+
+	ret := &SimpleFlightServer{
+		alloc: memory.NewGoAllocator(),
+		conn:  conn,
+	}
+
 	return ret
 }
 
@@ -66,20 +111,9 @@ func (s *SimpleFlightServer) GetFlightInfo(ctx context.Context, ticket *flightpb
 
 		a := string(msg.GetTransactionId())
 		query := string(a)[2:len(a)]
-		c, err := duckdb.NewConnector(s.dbPath, nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer c.Close()
-
-		conn, err := c.Connect(context.Background())
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer conn.Close()
 
 		// Obtain the Arrow from the connection.
-		arrow, err := duckdb.NewArrowFromConn(conn)
+		arrow, err := duckdb.NewArrowFromConn(s.conn)
 
 		rdr, err := arrow.QueryContext(context.Background(), query)
 		if err != nil {
@@ -141,21 +175,8 @@ func (s *SimpleFlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightSe
 
 	if strings.ToLower(entry[0]) == "select" {
 
-		c, err := duckdb.NewConnector("", nil)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		defer c.Close()
-
-		conn, err := c.Connect(context.Background())
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer conn.Close()
-
 		// Obtain the Arrow from the connection.
-		arrow, err := duckdb.NewArrowFromConn(conn)
+		arrow, err := duckdb.NewArrowFromConn(s.conn)
 
 		rdr, err := arrow.QueryContext(context.Background(), query)
 		if err != nil {
