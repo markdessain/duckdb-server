@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow/flight"
@@ -18,18 +20,24 @@ import (
 )
 
 func main() {
-	Launch(context.Background())
+
+	flag := flag.NewFlagSet("server", flag.ExitOnError)
+	dbPath := flag.String("db", "", "Path to DuckDB database file")
+	flag.Parse(os.Args[1:])
+	Launch(context.Background(), *dbPath)
 }
 
 // SimpleFlightServer implements the Flight service
 type SimpleFlightServer struct {
 	flight.BaseFlightServer
-	alloc memory.Allocator
+	alloc  memory.Allocator
+	dbPath string
 }
 
-func NewSimpleFlightServer() *SimpleFlightServer {
+func NewSimpleFlightServer(dbPath string) *SimpleFlightServer {
 	return &SimpleFlightServer{
-		alloc: memory.NewGoAllocator(),
+		alloc:  memory.NewGoAllocator(),
+		dbPath: dbPath,
 	}
 }
 
@@ -56,14 +64,8 @@ func (s *SimpleFlightServer) DoAction(action *flight.Action, stream flight.Fligh
 func (s *SimpleFlightServer) GetFlightInfo(ctx context.Context, ticket *flightpb.FlightDescriptor) (*flightpb.FlightInfo, error) {
 	fmt.Println("GetFlightInfo")
 
-	fmt.Println("A")
-	fmt.Println(ticket)
-	fmt.Println("B")
-	fmt.Println(string(ticket.GetCmd()))
-	fmt.Println("C")
-	// query := string(ticket.GetCmd())
 	query := "SELECT" + strings.Split(string(ticket.GetCmd()), "SELECT")[1]
-	c, err := duckdb.NewConnector("", nil)
+	c, err := duckdb.NewConnector(s.dbPath, nil)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -142,8 +144,8 @@ func (s *SimpleFlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightSe
 	return nil
 }
 
-func Launch(ctx context.Context) {
-	server := NewSimpleFlightServer()
+func Launch(ctx context.Context, dbPath string) {
+	server := NewSimpleFlightServer(dbPath)
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()
