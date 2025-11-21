@@ -7,6 +7,22 @@ metadata:
 data:
   config: |
     [[connections]]
+    name = "dremioproduction"
+    type = "dremio"
+
+    data.output_directory = "./data/dremio-prod"
+    data.flight_host = "..."
+    data.flight_port = ..
+    data.rest_host = "..."
+    data.rest_port = ...
+    data.username = "..."
+    data.password = "..."
+    data.use_ssl = ...
+    data.schemas = [...]
+
+    data.sample_size = 100
+
+    [[connections]]
     name = "example"
     type = "dummy"
 ---    
@@ -39,47 +55,47 @@ spec:
         - name: dremio-prod-schemas
           mountPath: /app/data/dremio-prod/schemas
 
-      - name: versity
-        image: versity/versitygw
-        restartPolicy: Always
-        command:
-          - /app/versitygw
-        args:
-          - --access=access 
-          - --secret=secret 
-          - azure 
-          - --account=$(ACCOUNT) 
-          - --access-key=$(ACCESS_KEY)
-        env:
-          - name: ACCESS_KEY
-            value: ...
-          - name: ACCOUNT
-            value: ...
+      # - name: versity
+      #   image: versity/versitygw
+      #   restartPolicy: Always
+      #   command:
+      #     - /app/versitygw
+      #   args:
+      #     - --access=access 
+      #     - --secret=secret 
+      #     - azure 
+      #     - --account=$(ACCOUNT) 
+      #     - --access-key=$(ACCESS_KEY)
+      #   env:
+      #     - name: ACCESS_KEY
+      #       value: ...
+      #     - name: ACCOUNT
+      #       value: ...
 
-      - name: s3fs
-        image: ghcr.io/nginxinc/nginx-s3-gateway/nginx-oss-s3-gateway:latest
-        restartPolicy: Always
-        env:
-          - name: AWS_ACCESS_KEY_ID
-            value: access
-          - name: AWS_SECRET_ACCESS_KEY
-            value: secret
-          - name: S3_BUCKET_NAME
-            value: dremio
-          - name: S3_SERVER
-            value: 0.0.0.0
-          - name: S3_SERVER_PROTO
-            value: "http"
-          - name: S3_SERVER_PORT
-            value: "7070"
-          - name: S3_REGION
-            value: "us-east-1"
-          - name: S3_STYLE
-            value: "path"
-          - name: ALLOW_DIRECTORY_LIST
-            value: "false"
-          - name: AWS_SIGS_VERSION
-            value: "4"
+      # - name: s3fs
+      #   image: ghcr.io/nginxinc/nginx-s3-gateway/nginx-oss-s3-gateway:latest
+      #   restartPolicy: Always
+      #   env:
+      #     - name: AWS_ACCESS_KEY_ID
+      #       value: access
+      #     - name: AWS_SECRET_ACCESS_KEY
+      #       value: secret
+      #     - name: S3_BUCKET_NAME
+      #       value: dremio
+      #     - name: S3_SERVER
+      #       value: 0.0.0.0
+      #     - name: S3_SERVER_PROTO
+      #       value: "http"
+      #     - name: S3_SERVER_PORT
+      #       value: "7070"
+      #     - name: S3_REGION
+      #       value: "us-east-1"
+      #     - name: S3_STYLE
+      #       value: "path"
+      #     - name: ALLOW_DIRECTORY_LIST
+      #       value: "false"
+      #     - name: AWS_SIGS_VERSION
+      #       value: "4"
 
       - name: setup-duckdb
         image: datacatering/duckdb:v1.4.1
@@ -116,10 +132,6 @@ spec:
 
             CREATE VIEW hello_world AS (SELECT 'hello' AS world);
 
-            ATTACH 'hello2' (TYPE AIRPORT, location 'grpc://127.0.0.1:8080');
-
-            SELECT database, schema, name FROM (show all tables);
-            
           - /home/duckdb/duckdb.db
         env:
           - name: TOKEN
@@ -142,7 +154,6 @@ spec:
           - |
             ATTACH 'hello2' (TYPE AIRPORT, location 'grpc://127.0.0.1:8080');
 
-            SELECT database, schema, name FROM (show all tables);
         securityContext:
           runAsUser: 1001
         volumeMounts: 
