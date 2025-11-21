@@ -1,3 +1,15 @@
+# kubectl create configmap dremio-prod-schemas --from-file="APEX.Orbit.dataops.data_observibility=data/dremio-prod/schemas/APEX.Orbit.dataops.data_observibility"
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airport
+data:
+  config: |
+    [[connections]]
+    name = "example"
+    type = "dummy"
+---    
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,6 +26,19 @@ spec:
         k8s-app: duckkube
     spec:
       initContainers:
+      - name: airport
+        image: ghcr.io/markdessain/airport-server:latest
+        restartPolicy: Always
+        command:
+          - airport-server
+        args:
+          - server
+        volumeMounts:
+        - name: config
+          mountPath: /app
+        - name: dremio-prod-schemas
+          mountPath: /app/data/dremio-prod/schemas
+
       - name: versity
         image: versity/versitygw
         restartPolicy: Always
@@ -23,10 +48,12 @@ spec:
           - --access=access 
           - --secret=secret 
           - azure 
-          - --account=orbitdatadev 
+          - --account=$(ACCOUNT) 
           - --access-key=$(ACCESS_KEY)
         env:
           - name: ACCESS_KEY
+            value: ...
+          - name: ACCOUNT
             value: ...
 
       - name: s3fs
@@ -68,6 +95,8 @@ spec:
             INSTALL http_client FROM community;
             INSTALL httpfs;
 
+            LOAD airport;
+
             CREATE PERSISTENT SECRET (
                 TYPE s3,
                 PROVIDER config,
@@ -79,8 +108,22 @@ spec:
                 URL_STYLE 'path'
             );
 
+            CREATE PERSISTENT SECRET (
+                type AIRPORT,
+                auth_token '$(TOKEN)',
+                scope 'grpc://127.0.0.1:8080'
+            );
+
             CREATE VIEW hello_world AS (SELECT 'hello' AS world);
+
+            ATTACH 'hello2' (TYPE AIRPORT, location 'grpc://127.0.0.1:8080');
+
+            SELECT database, schema, name FROM (show all tables);
+            
           - /home/duckdb/duckdb.db
+        env:
+          - name: TOKEN
+            value: ...
         securityContext:
           runAsUser: 1001
         volumeMounts: 
@@ -95,6 +138,11 @@ spec:
         args:
           - -db
           - /home/duckdb/duckdb.db
+          - -init
+          - |
+            ATTACH 'hello2' (TYPE AIRPORT, location 'grpc://127.0.0.1:8080');
+
+            SELECT database, schema, name FROM (show all tables);
         securityContext:
           runAsUser: 1001
         volumeMounts: 
@@ -105,3 +153,12 @@ spec:
         - name: mntdata
           emptyDir:
             sizeLimit: 500Mi
+        - name: config
+          configMap:
+            name: airport
+            items:
+              - key: config
+                path: config.toml
+        - name: dremio-prod-schemas
+          configMap:
+            name: dremio-prod-schemas
