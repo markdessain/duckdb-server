@@ -29,8 +29,9 @@ func main() {
 
 	flag := flag.NewFlagSet("server", flag.ExitOnError)
 	dbPath := flag.String("db", "", "Path to DuckDB database file")
+	initCommand := flag.String("init", "", "init command")
 	flag.Parse(os.Args[1:])
-	Launch(context.Background(), *dbPath)
+	Launch(context.Background(), *dbPath, *initCommand)
 }
 
 // SimpleFlightServer implements the Flight service
@@ -40,7 +41,7 @@ type SimpleFlightServer struct {
 	conn  driver.Conn
 }
 
-func NewSimpleFlightServer(dbPath string) *SimpleFlightServer {
+func NewSimpleFlightServer(dbPath string, initCommand string) *SimpleFlightServer {
 
 	// Create a blank DuckDB database if it doesn't exist
 	if dbPath != "" {
@@ -101,6 +102,12 @@ func NewSimpleFlightServer(dbPath string) *SimpleFlightServer {
 		} else {
 			fmt.Printf("Loaded extension: %s\n", ext)
 		}
+	}
+
+	// Step 3: Run Init
+	_, err = db.ExecContext(context.Background(), initCommand, []driver.NamedValue{})
+	if err != nil {
+		fmt.Printf("Failed to run init command %v\n", err)
 	}
 
 	ret := &SimpleFlightServer{
@@ -242,8 +249,8 @@ func (s *SimpleFlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightSe
 
 }
 
-func Launch(ctx context.Context, dbPath string) {
-	server := NewSimpleFlightServer(dbPath)
+func Launch(ctx context.Context, dbPath string, initCommand string) {
+	server := NewSimpleFlightServer(dbPath, initCommand)
 	grpcServer := grpc.NewServer()
 	flight.RegisterFlightServiceServer(grpcServer, server)
 
